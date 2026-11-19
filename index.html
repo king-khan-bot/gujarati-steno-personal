@@ -303,9 +303,8 @@ audioUrl = URL.createObjectURL(blob);
 player.src = audioUrl;
 download.href = audioUrl;
 download.download = 'gujarati-steno-audio.wav';
-    if (audioUrl) URL.revokeObjectURL(audioUrl);
-    audioUrl = URL.createObjectURL(correctedBlob);
-
+    
+    audioUrl = URL.createObjectURL(blob);
     player.src = audioUrl;
     download.href = audioUrl;
     download.download = 'gujarati-steno-audio.wav';
