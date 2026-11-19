@@ -36,8 +36,7 @@ export async function onRequestPost(context) {
         { status: 400 }
       );
     }
-
-    const voice = voiceChoice === "female" ? "Rekha" : "Nitin";
+const voice = voiceChoice === "female" ? "Falak" : "Veera";
 
     // Initial speed mapping; actual WPM needs audio testing and calibration.
     const speedMap = {
@@ -57,7 +56,7 @@ export async function onRequestPost(context) {
         },
         body: JSON.stringify({
           text,
-          model: "timbre-v3.0",
+          model: "timbre-v2.5",
           voice,
           language: "gu-IN",
           speed: speedMap[requestedWpm],
