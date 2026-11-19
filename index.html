@@ -328,11 +328,19 @@ document.getElementById('generate').addEventListener('click', async () => {
   button.disabled = true;
 
   try {
+  const chunks = splitIntoChunks(text, 200);
+  const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+  const audioBuffers = [];
+
+  for (let i = 0; i < chunks.length; i++) {
+    status.textContent =
+      `Generating audio: Part ${i + 1} of ${chunks.length}...`;
+
     const response = await fetch('/api/audio', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        text,
+        text: chunks[i],
         voice: document.getElementById('voice').value,
         speed: requestedWpm
       })
@@ -347,26 +355,51 @@ document.getElementById('generate').addEventListener('click', async () => {
       throw new Error(message);
     }
 
-    status.textContent = 'Adjusting audio duration...';
+    const audioBlob = await response.blob();
+    const audioData = await audioBlob.arrayBuffer();
+    const decoded = await audioContext.decodeAudioData(audioData);
+    audioBuffers.push(decoded);
+  }
 
-    const blob = await response.blob();
+  status.textContent = 'Joining audio parts...';
 
-if (audioUrl) URL.revokeObjectURL(audioUrl);
-audioUrl = URL.createObjectURL(blob);
+  const sampleRate = audioBuffers[0].sampleRate;
+  const channels = audioBuffers[0].numberOfChannels;
+  const totalLength = audioBuffers.reduce(
+    (sum, buffer) => sum + buffer.length, 0
+  );
 
-player.src = audioUrl;
-download.href = audioUrl;
-download.download = 'gujarati-steno-audio.wav';
+  const combined = audioContext.createBuffer(
+    channels, totalLength, sampleRate
+  );
 
-    section.style.display = 'block';
-    status.textContent =
-      'Audio ready! Approx duration: ' +
-      Math.floor(targetDuration / 60) + ':' +
-      String(Math.round(targetDuration % 60)).padStart(2, '0');
+  let position = 0;
 
-    await player.play();
+  for (const buffer of audioBuffers) {
+    for (let c = 0; c < channels; c++) {
+      combined.getChannelData(c).set(
+        buffer.getChannelData(Math.min(c, buffer.numberOfChannels - 1)),
+        position
+      );
+    }
+    position += buffer.length;
+  }
 
-  } catch (error) {
+  const finalBlob = audioBufferToWav(combined);
+  await audioContext.close();
+
+  if (audioUrl) URL.revokeObjectURL(audioUrl);
+  audioUrl = URL.createObjectURL(finalBlob);
+
+  player.src = audioUrl;
+  download.href = audioUrl;
+  download.download = 'gujarati-steno-audio.wav';
+
+  section.style.display = 'block';
+  status.textContent = 'Audio ready! ' + chunks.length +
+    ' parts joined successfully.';
+
+  await player.play();} catch (error) {
     status.textContent = 'Error: ' + error.message;
   } finally {
     button.disabled = false;
