@@ -295,19 +295,13 @@ document.getElementById('generate').addEventListener('click', async () => {
     status.textContent = 'Adjusting audio duration...';
 
     const blob = await response.blob();
-    
-if (audioUrl) URL.revokeObjectURL(audioUrl);
 
+if (audioUrl) URL.revokeObjectURL(audioUrl);
 audioUrl = URL.createObjectURL(blob);
 
 player.src = audioUrl;
 download.href = audioUrl;
 download.download = 'gujarati-steno-audio.wav';
-    
-    audioUrl = URL.createObjectURL(blob);
-    player.src = audioUrl;
-    download.href = audioUrl;
-    download.download = 'gujarati-steno-audio.wav';
 
     section.style.display = 'block';
     status.textContent =
