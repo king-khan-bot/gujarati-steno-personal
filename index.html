@@ -81,19 +81,175 @@ button:active{opacity:.8}
 <p id="status" class="note"></p>
 </div> 
 </div><script>
-const paragraph=document.getElementById('paragraph');
-const wordCount=document.getElementById('wordCount');
+const paragraph = document.getElementById('paragraph');
+const wordCount = document.getElementById('wordCount');
 
-function countWords(text){
- const words=text.trim().match(/\S+/gu);
- return words ? words.length : 0;
+function countWords(text) {
+  const words = text.trim().match(/\S+/gu);
+  return words ? words.length : 0;
 }
 
-paragraph.addEventListener('input',()=>{
- wordCount.textContent=countWords(paragraph.value);
+paragraph.addEventListener('input', () => {
+  wordCount.textContent = countWords(paragraph.value);
 });
 
+wordCount.textContent = countWords(paragraph.value);
+
 let audioUrl = null;
+
+function writeWav(buffer) {
+  const channels = buffer.numberOfChannels;
+  const sampleRate = buffer.sampleRate;
+  const frames = buffer.length;
+  const bytesPerSample = 2;
+  const dataSize = frames * channels * bytesPerSample;
+
+  const arrayBuffer = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(arrayBuffer);
+
+  function writeString(offset, string) {
+    for (let i = 0; i < string.length; i++) {
+      view.setUint8(offset + i, string.charCodeAt(i));
+    }
+  }
+
+  writeString(0, 'RIFF');
+  view.setUint32(4, 36 + dataSize, true);
+  writeString(8, 'WAVE');
+  writeString(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, channels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * channels * bytesPerSample, true);
+  view.setUint16(32, channels * bytesPerSample, true);
+  view.setUint16(34, 16, true);
+  writeString(36, 'data');
+  view.setUint32(40, dataSize, true);
+
+  let offset = 44;
+
+  for (let i = 0; i < frames; i++) {
+    for (let ch = 0; ch < channels; ch++) {
+      const sample = Math.max(-1, Math.min(1, buffer.getChannelData(ch)[i]));
+      view.setInt16(
+        offset,
+        sample < 0 ? sample * 32768 : sample * 32767,
+        true
+      );
+      offset += 2;
+    }
+  }
+
+  return new Blob([arrayBuffer], { type: 'audio/wav' });
+}
+
+function stretchAudio(input, speedFactor) {
+  const channels = input.numberOfChannels;
+  const sampleRate = input.sampleRate;
+  const inputLength = input.length;
+
+  const frameSize = Math.max(256, Math.round(sampleRate * 0.04));
+  const overlap = Math.floor(frameSize / 2);
+  const synthesisHop = frameSize - overlap;
+  const searchRange = Math.round(sampleRate * 0.008);
+  const outputLength = Math.max(1, Math.round(inputLength / speedFactor));
+
+  const source = [];
+  const output = [];
+
+  for (let ch = 0; ch < channels; ch++) {
+    source.push(input.getChannelData(ch));
+    output.push(new Float32Array(outputLength));
+  }
+
+  const mono = new Float32Array(inputLength);
+
+  for (let i = 0; i < inputLength; i++) {
+    for (let ch = 0; ch < channels; ch++) {
+      mono[i] += source[ch][i] / channels;
+    }
+  }
+
+  function correlation(outputPosition, sourcePosition) {
+    let sum = 0;
+    let outEnergy = 0;
+    let inEnergy = 0;
+
+    for (let i = 0; i < overlap; i += 4) {
+      const a = output[0][outputPosition + i] || 0;
+      const b = mono[sourcePosition + i] || 0;
+
+      sum += a * b;
+      outEnergy += a * a;
+      inEnergy += b * b;
+    }
+
+    return sum / (Math.sqrt(outEnergy * inEnergy) + 0.000001);
+  }
+
+  let sourcePosition = 0;
+  let outputPosition = 0;
+
+  for (let ch = 0; ch < channels; ch++) {
+    const count = Math.min(frameSize, inputLength, outputLength);
+    output[ch].set(source[ch].subarray(0, count), 0);
+  }
+
+  outputPosition = synthesisHop;
+  sourcePosition = Math.round(synthesisHop * speedFactor);
+
+  while (outputPosition < outputLength) {
+    const expected = sourcePosition;
+    let bestPosition = expected;
+    let bestScore = -Infinity;
+
+    const start = Math.max(0, expected - searchRange);
+    const end = Math.min(inputLength - frameSize, expected + searchRange);
+
+    for (let candidate = start; candidate <= end; candidate += 32) {
+      const score = correlation(outputPosition, candidate);
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestPosition = candidate;
+      }
+    }
+
+    for (let i = 0; i < frameSize && outputPosition + i < outputLength; i++) {
+      const position = outputPosition + i;
+
+      for (let ch = 0; ch < channels; ch++) {
+        const sample = source[ch][bestPosition + i] || 0;
+
+        if (i < overlap) {
+          const blend = i / overlap;
+          output[ch][position] =
+            output[ch][position] * (1 - blend) + sample * blend;
+        } else {
+          output[ch][position] = sample;
+        }
+      }
+    }
+
+    outputPosition += synthesisHop;
+    sourcePosition = bestPosition + Math.round(synthesisHop * speedFactor);
+
+    if (bestPosition + frameSize >= inputLength) break;
+  }
+
+  const result = new AudioBuffer({
+    numberOfChannels: channels,
+    length: outputLength,
+    sampleRate
+  });
+
+  for (let ch = 0; ch < channels; ch++) {
+    result.copyToChannel(output[ch], ch);
+  }
+
+  return result;
+}
 
 document.getElementById('generate').addEventListener('click', async () => {
   const text = paragraph.value.trim();
@@ -101,16 +257,19 @@ document.getElementById('generate').addEventListener('click', async () => {
   const section = document.getElementById('audioSection');
   const player = document.getElementById('audioPlayer');
   const download = document.getElementById('downloadAudio');
+  const button = document.getElementById('generate');
 
   if (!text) {
     alert('Please paste your Gujarati paragraph.');
     return;
   }
 
+  const words = countWords(text);
+  const requestedWpm = Number(document.getElementById('speed').value);
+  const targetDuration = (words / requestedWpm) * 60;
+
   status.textContent = 'Generating audio...';
   section.style.display = 'none';
-
-  const button = document.getElementById('generate');
   button.disabled = true;
 
   try {
@@ -120,24 +279,51 @@ document.getElementById('generate').addEventListener('click', async () => {
       body: JSON.stringify({
         text,
         voice: document.getElementById('voice').value,
-        speed: Number(document.getElementById('speed').value)
+        speed: requestedWpm
       })
     });
 
     if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.details || error.error || 'Audio generation failed');
+      let message = 'Audio generation failed.';
+      try {
+        const error = await response.json();
+        message = error.details || error.error || message;
+      } catch (_) {}
+      throw new Error(message);
     }
 
+    status.textContent = 'Adjusting audio duration...';
+
     const blob = await response.blob();
+    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+
+    const audioData = await blob.arrayBuffer();
+    const decoded = await audioContext.decodeAudioData(audioData);
+
+    const actualDuration = decoded.duration;
+    const speedFactor = actualDuration / targetDuration;
+
+    if (!Number.isFinite(speedFactor) || speedFactor < 0.25 || speedFactor > 4) {
+      throw new Error('Duration correction is outside the supported range.');
+    }
+
+    const corrected = stretchAudio(decoded, speedFactor);
+    const correctedBlob = writeWav(corrected);
+
+    await audioContext.close();
 
     if (audioUrl) URL.revokeObjectURL(audioUrl);
-    audioUrl = URL.createObjectURL(blob);
+    audioUrl = URL.createObjectURL(correctedBlob);
 
     player.src = audioUrl;
     download.href = audioUrl;
+    download.download = 'gujarati-steno-audio.wav';
+
     section.style.display = 'block';
-    status.textContent = 'Audio ready!';
+    status.textContent =
+      'Audio ready! Approx duration: ' +
+      Math.floor(targetDuration / 60) + ':' +
+      String(Math.round(targetDuration % 60)).padStart(2, '0');
 
     await player.play();
 
@@ -147,11 +333,10 @@ document.getElementById('generate').addEventListener('click', async () => {
     button.disabled = false;
   }
 });
-
 document.getElementById('restartAudio').addEventListener('click', () => {
   const player = document.getElementById('audioPlayer');
   player.currentTime = 0;
   player.play();
 });
-</script></body>
+ </script></body>
 </html>
