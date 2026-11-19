@@ -40,12 +40,11 @@ const voice = voiceChoice === "female" ? "Falak" : "Veera";
 
     // Initial speed mapping; actual WPM needs audio testing and calibration.
     const speedMap = {
-      60: 1.0,
-      80: 1.0,
-      90: 1.0,
-      110: 1.0
-    };
-
+  60: 0.85,
+  80: 0.85,
+  90: 0.85,
+  110: 1.0
+};
     const apiResponse = await fetch(
       "https://api.vachana.ai/api/v1/tts/inference",
       {
