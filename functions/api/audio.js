@@ -41,10 +41,10 @@ export async function onRequestPost(context) {
 
     // Initial speed mapping; actual WPM needs audio testing and calibration.
     const speedMap = {
-      60: 0.8,
-      80: 0.9,
+      60: 1.0,
+      80: 1.0,
       90: 1.0,
-      110: 1.2
+      110: 1.0
     };
 
     const apiResponse = await fetch(
