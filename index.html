@@ -295,23 +295,14 @@ document.getElementById('generate').addEventListener('click', async () => {
     status.textContent = 'Adjusting audio duration...';
 
     const blob = await response.blob();
-    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    
+if (audioUrl) URL.revokeObjectURL(audioUrl);
 
-    const audioData = await blob.arrayBuffer();
-    const decoded = await audioContext.decodeAudioData(audioData);
+audioUrl = URL.createObjectURL(blob);
 
-    const actualDuration = decoded.duration;
-    const speedFactor = actualDuration / targetDuration;
-
-    if (!Number.isFinite(speedFactor) || speedFactor < 0.25 || speedFactor > 4) {
-      throw new Error('Duration correction is outside the supported range.');
-    }
-
-    const corrected = stretchAudio(decoded, speedFactor);
-    const correctedBlob = writeWav(corrected);
-
-    await audioContext.close();
-
+player.src = audioUrl;
+download.href = audioUrl;
+download.download = 'gujarati-steno-audio.wav';
     if (audioUrl) URL.revokeObjectURL(audioUrl);
     audioUrl = URL.createObjectURL(correctedBlob);
 
